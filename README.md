@@ -1,63 +1,70 @@
 # Auto File Organizer
 
-A desktop application that monitors one or more user-selected folders in real-time and automatically organizes new files into category subfolders based on their file extensions.
+**The only auto-organizer that knows what NOT to touch.**
 
-## Core Features
+Auto File Organizer watches your Downloads (or any folder you pick) and tidies new files into category subfolders — Images, Documents, Presentations, Archives, Programs — automatically, in the background. Coding projects are never touched thanks to **SafeZone Detection**.
 
-### Real-Time Folder Monitoring
-- Monitor one or more user-selected folders in real-time (live mode, not scheduled/manual-only)
-- Continuously watches for new files appearing in watched folders
-- No polling intervals - instant detection of file changes
+- No technical knowledge needed: no terminal, no config editing, no jargon.
+- Runs in the system tray, starts with Windows, zero maintenance after install.
+- One-click **Undo** + a plain-language **Activity Feed** so you always know what happened.
 
-### Automatic Organization
-- When a new file appears, automatically moves it into a category subfolder based on its file extension
-- Pre-defined category mappings for common file types (images, documents, videos, audio, archives, etc.)
-- Customizable category rules and folder mappings
+## SafeZone Detection (the moat)
 
-### System Tray Integration
-- Runs continuously in the background via system tray (not a normal open window)
-- Minimal UI footprint - stays out of the way until needed
-- Double-click tray icon to open/close the main window
+A folder is auto-protected — skipped entirely, including everything inside it — when it contains:
 
-### Auto-Start on Windows Boot
-- Auto-starts when Windows boots — user should NEVER need to manually open the app again after the first-time install
-- Configured via Windows Task Scheduler on first launch
-- Optional: user can disable auto-start from the settings menu
+- a `.git` folder, `package.json`, `requirements.txt`, `venv/`, `.env`, `node_modules/`, `.vscode/`, or
+- a mix of code files (`.py`, `.js`, `.java`, …)
 
-### Undo Functionality
-- Provides Undo functionality for the last organizing action
-- Quickly restore mistakenly moved files to their original location
-- Accessible from the system tray menu or main window
+Plus a manual **Ignore List** for anything you want skipped on top of auto-detection. Protected items show as `🛡️ name skipped (protected)` in the Activity Feed with a plain-language reason.
 
-### Activity Log
-- Maintains an activity log (visible in-app) of what was moved and where
-- Logs include: filename, source folder, destination category folder, timestamp
-- Scrollable log view in the main window
-- Log entries can be cleared manually if desired
+Only loose, top-level files are ever moved. Subfolder contents are never reorganized.
 
-## Technology Stack
-- Built with Electron/Node.js for cross-platform desktop compatibility
-- Real-time file system watching using chokidar or similar library
-- Windows Task Scheduler for auto-start configuration
-- SQLite or JSON for activity log persistence
+## Install (end users)
 
-## Installation
-1. Download the latest installer from the releases page
-2. Run the installer
-3. On first launch, select folders to monitor
-4. Configure category preferences if needed
-5. The app will auto-start with Windows and begin monitoring immediately
+1. Download `Setup-FileOrganizer.exe` from Releases and run it.
+2. Keep **"Start automatically when Windows starts"** checked (default).
+3. On first launch: Get Started → pick a folder → Start Organizing. Done — you'll never need to open it again.
 
-## Usage
-- Open the main window from the system tray icon
-- Add/remove folders to monitor via the "Folders" menu
-- View the activity log to see organized files
-- Use "Undo" to reverse the last action
-- Adjust settings as needed
+### Why did Windows show a warning?
 
-## Configuration
-- Add watched folders via the + button
-- Remove folders with the trash icon
-- Customize file extension to category mappings
-- Set auto-start preferences
-- Clear activity log from settings
+Early releases may show a SmartScreen **"Unknown Publisher"** prompt until the app builds download reputation — this is normal for new independent software, not a sign of malware.
+
+1. Click **More info**.
+2. Click **Run anyway**.
+
+The app is open-source: every file it moves is listed in the Activity Feed and reversible with **Undo**. Auto-start uses a plain Startup-folder shortcut (no registry tricks), and the app never touches your code folders.
+
+## Run from source (developers)
+
+```powershell
+pip install -r requirements.txt
+python main.py            # dashboard window
+python main.py --tray     # background tray mode (what autostart uses)
+```
+
+Build:
+
+```powershell
+pyinstaller --onedir --windowed --name FileOrganizer --icon assets\icon.ico main.py
+iscc installer\FileOrganizer.iss
+```
+
+## Project layout
+
+```
+organizer.py         - core file-moving logic (safety rules live here)
+project_detector.py  - SafeZone Detection (get this right before anything else)
+watcher.py           - watchdog real-time monitoring
+gui.py               - CustomTkinter onboarding + dashboard
+tray.py              - pystray system tray integration
+main.py              - entry point (--tray = background mode)
+config.json          - extension → category map (backend only)
+settings.json        - user state (created on first run)
+logs/activity.log   - what was moved / skipped
+installer/           - Inno Setup script (Startup-folder autostart)
+```
+
+## Tech
+
+Python · watchdog · CustomTkinter · pystray · PyInstaller (`--onedir`) · Inno Setup.
+Free tier v1 (matches the LadeStack free+donation pattern). Multi-PC sync of the Ignore List and Pro category presets are reserved for v1.1 — the architecture doesn't block them.

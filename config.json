@@ -1,0 +1,14 @@
+{
+  "categories": {
+    "Images": [".png", ".jpg", ".jpeg", ".gif", ".svg"],
+    "Documents": [".pdf", ".docx", ".doc", ".txt"],
+    "Presentations": [".pptx"],
+    "Code_Markdown": [".md"],
+    "Archives": [".zip", ".rar"],
+    "Programs": [".exe", ".msi", ".dmg"],
+    "Others": []
+  },
+  "display_names": {
+    "Code_Markdown": "Code/Markdown"
+  }
+}
