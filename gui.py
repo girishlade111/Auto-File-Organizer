@@ -63,7 +63,8 @@ def feed_text(result: dict) -> tuple[str, str]:
         name = result.get("name") or Path(result.get("src", "?")).name
         return f"\U0001F6E1\uFE0F {name} skipped (protected)", "protected"
     if status == "protected-check":
-        return "", "info"
+        name = Path(result.get("src", "?")).name
+        return f"\U0001F6E1\uFE0F {name} skipped (protected project folder)", "protected"
     if status == "skipped":
         reason = result.get("reason", "")
         if reason in ("already organized", "system file",
@@ -72,7 +73,10 @@ def feed_text(result: dict) -> tuple[str, str]:
         if reason == "download in progress":
             src = Path(result.get("src", "?")).name
             return f"\u23F3 {src} — still downloading, will retry", "info"
-        return "", "info"
+        # Any other skip reason from the organizer gets a plain message —
+        # transparency beats a quiet feed; nothing falls through to "".
+        src = Path(result.get("src", "?")).name
+        return f"\u23ED {src} skipped \u2014 {reason}", "info"
     if status == "error":
         src = Path(result.get("src", "?")).name
         return f"\u26A0\uFE0F {src} couldn't be moved", "error"

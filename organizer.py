@@ -202,30 +202,46 @@ def undo_last_action() -> dict:
     """Undo the most recent organize batch. Returns a result dict for the UI."""
     stack = _load_undo_stack()
     if not stack:
-        return {"status": "empty", "restored": 0, "message": "Nothing to undo."}
+        return {"status": "empty", "restored": 0, "renamed": [],
+                "skipped": [], "failed": [], "message": "Nothing to undo."}
     batch = stack[-1]["batch"]
     to_undo = [m for m in stack if m["batch"] == batch]
     remaining = [m for m in stack if m["batch"] != batch]
 
-    restored, failed = 0, []
+    restored, renamed, skipped, failed = 0, [], [], []
     for move in reversed(to_undo):
         dst, src = Path(move["dst"]), Path(move["src"])
         try:
-            if dst.exists():
-                src.parent.mkdir(parents=True, exist_ok=True)
-                target = _unique_destination(src.parent, src.name) \
-                    if src.exists() else src
+            if not dst.exists():
+                # Organized file vanished since (user moved/deleted it):
+                # count explicitly instead of silently dropping the entry.
+                skipped.append(dst.name)
+                continue
+            src.parent.mkdir(parents=True, exist_ok=True)
+            if src.exists():
+                # Original spot is taken by a different file: restore
+                # alongside it and SAY SO — never silently rename.
+                target = _unique_destination(src.parent, src.name)
                 shutil.move(str(dst), str(target))
+                renamed.append(f"{src.name} restored as {target.name}")
+            else:
+                shutil.move(str(dst), str(src))
                 restored += 1
         except (OSError, shutil.Error):
             failed.append(dst.name)
     _save_undo_stack(remaining)
-    msg = f"Restored {restored} file(s)."
+    total = len(to_undo)
+    msg = f"Restored {restored} of {total} file(s)."
+    if renamed:
+        msg += f" {len(renamed)} restored under a new name (original spot taken): " \
+               f"{', '.join(renamed)}."
+    if skipped:
+        msg += f" {len(skipped)} skipped (already gone): {', '.join(skipped)}."
     if failed:
         msg += f" Could not restore: {', '.join(failed)}."
     log_activity(f"UNDO: {msg}")
-    return {"status": "ok", "restored": restored,
-            "failed": failed, "message": msg}
+    return {"status": "ok", "restored": restored, "renamed": renamed,
+            "skipped": skipped, "failed": failed, "message": msg}
 
 
 def has_undo_available() -> bool:
@@ -267,7 +283,15 @@ def organize_file(file_path: str | Path, watched_root: str | Path,
     if not src.is_file():
         return {"status": "skipped", "reason": "not a file",
                 "src": str(src), "dst": None}
+    category = get_category(src.name)
     try:
+        # Already sitting in its correct category folder (e.g. re-scan
+        # after a move): nothing to do. Checked BEFORE the subfolder
+        # short-circuit below, which would otherwise swallow this case.
+        if (src.parent.name == category
+                and src.parent.parent.resolve() == root.resolve()):
+            return {"status": "skipped", "reason": "already organized",
+                    "src": str(src), "dst": None}
         # Only direct children of the watched folder — never touch subfolders.
         if src.parent.resolve() != root.resolve():
             return {"status": "skipped", "reason": "inside a subfolder",
@@ -284,17 +308,16 @@ def organize_file(file_path: str | Path, watched_root: str | Path,
                 "src": str(src), "dst": None}
 
     if wait_for_stable and not wait_until_stable(src):
-        return {"status": "skipped", "reason": "file is still changing",
+        # wait_until_stable() only returns False on OSError — i.e. the file
+        # vanished mid-check — so label it accurately. (A genuine timeout
+        # proceeds as stable by design, so "still changing" is unreachable.)
+        return {"status": "skipped",
+                "reason": "file was moved or deleted before it could be organized",
                 "src": str(src), "dst": None}
 
-    category = get_category(src.name)
     dest_dir = root / category
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
-        # Already where it belongs (e.g. re-scan after a move).
-        if src.parent.resolve() == dest_dir.resolve():
-            return {"status": "skipped", "reason": "already organized",
-                    "src": str(src), "dst": None}
         dest = _unique_destination(dest_dir, src.name)
         shutil.move(str(src), str(dest))
     except (OSError, shutil.Error) as exc:
