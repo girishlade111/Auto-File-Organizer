@@ -15,6 +15,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from organizer import log_activity
+
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Auto File Organizer")
@@ -34,16 +36,16 @@ def _run_gui_with_tray(start_in_tray: bool) -> int:
         if app is not None:
             try:
                 app.show_window()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_activity(f"ERROR: tray Open callback (app.show_window): {exc}")
 
     def _organize():
         app = holder.get("app")
         if app is not None:
             try:
                 app.organize_now()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_activity(f"ERROR: tray Organize callback (app.organize_now): {exc}")
         else:
             _organize_headless()
 
@@ -52,8 +54,8 @@ def _run_gui_with_tray(start_in_tray: bool) -> int:
         if app is not None:
             try:
                 app.undo_last()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_activity(f"ERROR: tray Undo callback (app.undo_last): {exc}")
         else:
             import organizer as org
             org.undo_last_action()
@@ -67,7 +69,8 @@ def _run_gui_with_tray(start_in_tray: bool) -> int:
                 app_settings.save_settings(app.settings)
                 app._apply_live_mode()
                 return app.settings["live_mode"]
-            except Exception:
+            except Exception as exc:
+                log_activity(f"ERROR: tray toggle-live callback: {exc}")
                 return None
         s = app_settings.load_settings()
         s["live_mode"] = not s.get("live_mode", True)
@@ -80,7 +83,8 @@ def _run_gui_with_tray(start_in_tray: bool) -> int:
         if app is not None:
             try:
                 return bool(app.settings.get("live_mode", True))
-            except Exception:
+            except Exception as exc:
+                log_activity(f"ERROR: tray is-live check: {exc}")
                 return True
         return bool(app_settings.load_settings().get("live_mode", True))
 
@@ -116,18 +120,18 @@ def _run_gui_with_tray(start_in_tray: bool) -> int:
         try:
             if headless_watcher is not None:
                 headless_watcher.stop_all()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_activity(f"ERROR: shutdown (headless watcher stop): {exc}")
         app = holder.get("app")
         if app is not None:
             try:
                 app.watcher.stop_all()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_activity(f"ERROR: shutdown (GUI watcher stop): {exc}")
             try:
                 app.destroy()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_activity(f"ERROR: shutdown (app.destroy): {exc}")
         if tray is not None:
             tray.stop()
 
@@ -147,8 +151,8 @@ def _run_gui_with_tray(start_in_tray: bool) -> int:
         try:
             if headless_watcher is not None:
                 headless_watcher.stop_all()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_activity(f"ERROR: shutdown (headless watcher stop): {exc}")
         return 0
 
     # Foreground mode: full dashboard + tray icon alongside.

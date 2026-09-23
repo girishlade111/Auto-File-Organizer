@@ -106,16 +106,16 @@ class ToolTip:
             tw.wm_overrideredirect(True)
             tw.wm_geometry(f"+{x}+{y}")
             ctk.CTkLabel(tw, text=self.text, font=FONT_SMALL,
-                         wraplength=260).pack(padx=10, pady=8)
-        except Exception:
-            pass
+                          wraplength=260).pack(padx=10, pady=8)
+        except Exception as exc:
+            org.log_activity(f"ERROR: ToolTip._show: {exc}")
 
     def _hide(self, _event=None):
         if self.tip is not None:
             try:
                 self.tip.destroy()
-            except Exception:
-                pass
+            except Exception as exc:
+                org.log_activity(f"ERROR: ToolTip._hide: {exc}")
             self.tip = None
 
 
@@ -337,9 +337,9 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
             self.status_dot.configure(text_color=color)
             self.status_label.configure(
                 text=status if status != "Error"
-                else "Error — monitoring unavailable (pip install watchdog)")
-        except Exception:
-            pass
+                 else "Error — monitoring unavailable (pip install watchdog)")
+        except Exception as exc:
+            org.log_activity(f"ERROR: App._update_status_ui: {exc}")
         if not initial:
             self.push_feed(f"Status: {status}", "info")
 
@@ -363,8 +363,8 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
                 self.live_switch.select()
             else:
                 self.live_switch.deselect()
-        except Exception:
-            pass
+        except Exception as exc:
+            org.log_activity(f"ERROR: App._apply_live_mode: {exc}")
         self._update_status_ui(initial=initial)
 
     # -- Zone 2: folder cards ---------------------------------------------------
@@ -372,7 +372,8 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
         try:
             for child in self.folders_frame.winfo_children():
                 child.destroy()
-        except Exception:
+        except Exception as exc:
+            org.log_activity(f"ERROR: App._refresh_folder_cards: {exc}")
             return
         folders = self.settings.get("watched_folders", [])
         if not folders:
@@ -396,8 +397,9 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
             loose = 0
         try:
             protected = [s for s in scan_watched_folder(path, ignore)
-                         if s["protected"]]
-        except Exception:
+                          if s["protected"]]
+        except Exception as exc:
+            org.log_activity(f"ERROR: App._make_folder_card protected scan: {exc}")
             protected = []
 
         title = ctk.CTkLabel(card, text=f"\U0001F4C1  {path.name or folder}",
@@ -480,8 +482,8 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
                 self.feed_box.insert("end", msg + "\n")
             self.feed_box.see("end")
             self.feed_box.configure(state="disabled")
-        except Exception:
-            pass
+        except Exception as exc:
+            org.log_activity(f"ERROR: App.push_feed: {exc}")
 
     def _poll_feed_queue(self):
         try:
@@ -495,8 +497,8 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
             pass
         try:
             self.after(200, self._poll_feed_queue)
-        except Exception:
-            pass
+        except Exception as exc:
+            org.log_activity(f"ERROR: App._poll_feed_queue reschedule: {exc}")
 
     def _on_watcher_result_threadsafe(self, result: dict):
         self._feed_queue.put(result)
@@ -528,8 +530,8 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
     def _on_organize_done(self, moved: int, protected: int):
         try:
             self.organize_btn.configure(state="normal", text="\u2728  Organize Now")
-        except Exception:
-            pass
+        except Exception as exc:
+            org.log_activity(f"ERROR: App._on_organize_done: {exc}")
         self._refresh_folder_cards()
         self._refresh_undo_state()
         extra = f" ({protected} protected skipped)" if protected else ""
@@ -560,8 +562,8 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
         try:
             state = "normal" if org.has_undo_available() else "disabled"
             self.undo_btn.configure(state=state)
-        except Exception:
-            pass
+        except Exception as exc:
+            org.log_activity(f"ERROR: App._refresh_undo_state: {exc}")
 
     def _toast(self, message: str):
         self.push_feed(message, "info")
@@ -571,8 +573,8 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
             toast.wm_geometry(f"+{self.winfo_rootx() + 120}+{self.winfo_rooty() + 120}")
             ctk.CTkLabel(toast, text=message, font=FONT_NORMAL).pack(padx=20, pady=14)
             toast.after(2200, toast.destroy)
-        except Exception:
-            pass
+        except Exception as exc:
+            org.log_activity(f"ERROR: App._toast: {exc}")
 
     # -- Settings ------------------------------------------------------------------
     def open_settings(self):
@@ -612,9 +614,9 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
         try:
             cats = org.get_managed_category_dir_names()
             ctk.CTkLabel(win, text=", ".join(org.display_name(c) for c in cats),
-                         font=FONT_SMALL, wraplength=460).pack(anchor="w", padx=16)
-        except Exception:
-            pass
+                          font=FONT_SMALL, wraplength=460).pack(anchor="w", padx=16)
+        except Exception as exc:
+            org.log_activity(f"ERROR: App.open_settings category list: {exc}")
         ctk.CTkLabel(win, text="Category rules live in the app files — no setup needed.",
                      font=FONT_SMALL).pack(anchor="w", padx=16, pady=(0, 8))
 
@@ -643,18 +645,18 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
             self.deiconify()
             self.lift()
             self.focus_force()
-        except Exception:
-            pass
+        except Exception as exc:
+            org.log_activity(f"ERROR: App.show_window: {exc}")
 
     def _quit_app(self):
         try:
             self.watcher.stop_all()
-        except Exception:
-            pass
+        except Exception as exc:
+            org.log_activity(f"ERROR: App._quit_app watcher stop: {exc}")
         try:
             self.destroy()
-        except Exception:
-            pass
+        except Exception as exc:
+            org.log_activity(f"ERROR: App._quit_app destroy: {exc}")
 
 
 def launch(tray_controller=None):

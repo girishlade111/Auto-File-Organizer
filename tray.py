@@ -14,6 +14,8 @@ import threading
 from pathlib import Path
 from typing import Callable
 
+from organizer import log_activity
+
 try:
     import pystray
     from pystray import Menu, MenuItem
@@ -82,14 +84,15 @@ class TrayController:
         try:
             if self._icon is not None:
                 self._icon.stop()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_activity(f"ERROR: TrayController.stop: {exc}")
 
     # -- internals ----------------------------------------------------------
     def _live_label(self) -> str:
         try:
             live = self.is_live() if self.is_live else True
-        except Exception:
+        except Exception as exc:
+            log_activity(f"ERROR: TrayController._live_label: {exc}")
             live = True
         return "Pause auto-organize" if live else "Resume auto-organize"
 
@@ -99,8 +102,8 @@ class TrayController:
                 try:
                     if fn:
                         fn()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log_activity(f"ERROR: tray menu callback {getattr(fn, '__name__', fn)}: {exc}")
             return _inner
 
         return Menu(
@@ -130,17 +133,20 @@ class TrayController:
             root.destroy()
             if not still:
                 return
-        except Exception:
-            pass  # no display — treat click as confirmed exit
+        except Exception as exc:
+            # Dialog failure (no display, Tk error, ...) must NOT count as
+            # confirmation: stay running and make the failure visible.
+            log_activity(f"ERROR: tray exit confirmation dialog failed ({exc}); not exiting")
+            return
         try:
             icon.stop()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_activity(f"ERROR: TrayController._on_exit_clicked icon.stop: {exc}")
         try:
             if self.on_exit:
                 self.on_exit()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_activity(f"ERROR: TrayController._on_exit_clicked on_exit: {exc}")
 
     def _run_blocking(self) -> None:
         icon_path = Path(__file__).resolve().parent / "assets" / "icon.ico"
@@ -149,11 +155,12 @@ class TrayController:
                 image = Image.open(str(icon_path))
             else:
                 image = make_icon_image()
-        except Exception:
+        except Exception as exc:
+            log_activity(f"ERROR: TrayController._run_blocking icon load: {exc}")
             image = make_icon_image()
         self._icon = pystray.Icon("Auto File Organizer", image,
                                   "Auto File Organizer", menu=self._menu())
         try:
             self._icon.run()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_activity(f"ERROR: TrayController._run_blocking icon loop: {exc}")

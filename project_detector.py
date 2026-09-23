@@ -149,7 +149,11 @@ def scan_watched_folder(watched: str | os.PathLike, ignore_list=None) -> list[di
 
     try:
         managed = {n.lower() for n in get_managed_category_dir_names()}
-    except Exception:
+    except Exception as exc:
+        # organizer is already imported above (line 143), so this cannot
+        # introduce a cycle; the fallback stays silent-free by logging.
+        from organizer import log_activity
+        log_activity(f"ERROR: scan_watched_folder category names unreadable ({exc}); showing all subfolders.")
         managed = set()
 
     try:

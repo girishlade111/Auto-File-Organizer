@@ -40,6 +40,14 @@ SYSTEM_FILES = frozenset({
 })
 
 _lock = threading.Lock()
+# Dedicated lock for undo_history.json load→mutate→save sequences. Deliberately
+# separate from _lock: _lock guards microsecond in-memory category-cache copies
+# (taken on every get_category call), while undo sequences perform file I/O
+# (moves, fsync writes). Sharing one lock would couple the hot read path to
+# slow undo I/O for no benefit. No code path holds both locks (category
+# functions never call undo functions and vice versa), so no lock ordering
+# hazard exists in either direction.
+_undo_lock = threading.Lock()
 _category_map: dict[str, str] | None = None   # ext (".pdf") -> folder name ("Documents")
 _category_dirs: set[str] | None = None        # lower-cased managed folder names
 _display_names: dict[str, str] | None = None
@@ -188,48 +196,55 @@ def _save_undo_stack(stack: list[dict]) -> None:
 
 
 def record_move(original: Path, moved_to: Path, batch_id: str | None = None) -> None:
-    stack = _load_undo_stack()
-    stack.append({
-        "src": str(original),
-        "dst": str(moved_to),
-        "batch": batch_id or uuid.uuid4().hex[:8],
-        "time": datetime.now().isoformat(timespec="seconds"),
-    })
-    _save_undo_stack(stack)
+    # Serialized with undo_last_action: concurrent watcher debounce-timer
+    # threads must not interleave load→append→save and silently lose entries.
+    with _undo_lock:
+        stack = _load_undo_stack()
+        stack.append({
+            "src": str(original),
+            "dst": str(moved_to),
+            "batch": batch_id or uuid.uuid4().hex[:8],
+            "time": datetime.now().isoformat(timespec="seconds"),
+        })
+        _save_undo_stack(stack)
 
 
 def undo_last_action() -> dict:
     """Undo the most recent organize batch. Returns a result dict for the UI."""
-    stack = _load_undo_stack()
-    if not stack:
-        return {"status": "empty", "restored": 0, "renamed": [],
-                "skipped": [], "failed": [], "message": "Nothing to undo."}
-    batch = stack[-1]["batch"]
-    to_undo = [m for m in stack if m["batch"] == batch]
-    remaining = [m for m in stack if m["batch"] != batch]
+    # Whole load→restore→save sequence is serialized with record_move so a
+    # concurrent move cannot slip an entry in between and have it wiped out
+    # when `remaining` is written back.
+    with _undo_lock:
+        stack = _load_undo_stack()
+        if not stack:
+            return {"status": "empty", "restored": 0, "renamed": [],
+                    "skipped": [], "failed": [], "message": "Nothing to undo."}
+        batch = stack[-1]["batch"]
+        to_undo = [m for m in stack if m["batch"] == batch]
+        remaining = [m for m in stack if m["batch"] != batch]
 
-    restored, renamed, skipped, failed = 0, [], [], []
-    for move in reversed(to_undo):
-        dst, src = Path(move["dst"]), Path(move["src"])
-        try:
-            if not dst.exists():
-                # Organized file vanished since (user moved/deleted it):
-                # count explicitly instead of silently dropping the entry.
-                skipped.append(dst.name)
-                continue
-            src.parent.mkdir(parents=True, exist_ok=True)
-            if src.exists():
-                # Original spot is taken by a different file: restore
-                # alongside it and SAY SO — never silently rename.
-                target = _unique_destination(src.parent, src.name)
-                shutil.move(str(dst), str(target))
-                renamed.append(f"{src.name} restored as {target.name}")
-            else:
-                shutil.move(str(dst), str(src))
-                restored += 1
-        except (OSError, shutil.Error):
-            failed.append(dst.name)
-    _save_undo_stack(remaining)
+        restored, renamed, skipped, failed = 0, [], [], []
+        for move in reversed(to_undo):
+            dst, src = Path(move["dst"]), Path(move["src"])
+            try:
+                if not dst.exists():
+                    # Organized file vanished since (user moved/deleted it):
+                    # count explicitly instead of silently dropping the entry.
+                    skipped.append(dst.name)
+                    continue
+                src.parent.mkdir(parents=True, exist_ok=True)
+                if src.exists():
+                    # Original spot is taken by a different file: restore
+                    # alongside it and SAY SO — never silently rename.
+                    target = _unique_destination(src.parent, src.name)
+                    shutil.move(str(dst), str(target))
+                    renamed.append(f"{src.name} restored as {target.name}")
+                else:
+                    shutil.move(str(dst), str(src))
+                    restored += 1
+            except (OSError, shutil.Error):
+                failed.append(dst.name)
+        _save_undo_stack(remaining)
     total = len(to_undo)
     msg = f"Restored {restored} of {total} file(s)."
     if renamed:

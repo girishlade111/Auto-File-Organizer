@@ -91,8 +91,9 @@ class OrganizerEventHandler(FileSystemEventHandler):
                             self._emit({"status": "protected", "src": str(src),
                                         "dst": None, "reason": reason,
                                         "name": src.name})
-                    except OSError:
-                        pass
+                    except OSError as exc:
+                        from organizer import log_activity
+                        log_activity(f"ERROR: OrganizerEventHandler._handle subfolder check: {exc}")
                 return
             if not src.is_file():
                 return
@@ -106,8 +107,9 @@ class OrganizerEventHandler(FileSystemEventHandler):
         if self.on_result is not None:
             try:
                 self.on_result(result)
-            except Exception:
-                pass
+            except Exception as exc:
+                from organizer import log_activity
+                log_activity(f"ERROR: OrganizerEventHandler._emit: {exc}")
 
 
 class FolderWatcherManager:
