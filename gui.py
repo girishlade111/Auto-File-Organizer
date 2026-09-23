@@ -12,8 +12,9 @@ OS light/dark theme automatically (no manual toggle).
 """
 
 from __future__ import annotations
-
+import json
 import os
+
 import queue
 import subprocess
 import threading
@@ -86,6 +87,15 @@ def feed_text(result: dict) -> tuple[str, str]:
     return "", "info"
 
 
+def _settings_fingerprint_now():
+    """(mtime, size) of settings.json, or None if unreadable/missing."""
+    try:
+        st = app_settings.SETTINGS_PATH.stat()
+        return (st.st_mtime, st.st_size)
+    except OSError:
+        return None
+
+
 class ToolTip:
     """Minimal hover tooltip (plain-language explanations for protected items)."""
 
@@ -125,6 +135,7 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
         super().__init__()
         self.tray_controller = tray_controller
         self.settings = app_settings.load_settings()
+        self._settings_fingerprint = _settings_fingerprint_now()
         self.watcher = FolderWatcherManager(
             on_result=self._on_watcher_result_threadsafe,
             get_ignore_list=lambda: self.settings.get("ignore_list", []))
@@ -505,8 +516,9 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
 
     # -- Zone 4: quick actions ----------------------------------------------------
     def organize_now(self):
+        self._maybe_reload_settings()
         folders = [f for f in self.settings.get("watched_folders", [])
-                   if Path(f).is_dir()]
+                    if Path(f).is_dir()]
         if not folders:
             messagebox.showinfo("No folders",
                                 "Add a folder first, then press Organize Now.")
@@ -577,7 +589,39 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
             org.log_activity(f"ERROR: App._toast: {exc}")
 
     # -- Settings ------------------------------------------------------------------
+    def _maybe_reload_settings(self):
+        """Re-read settings.json if it changed on disk since our last load.
+
+        Boundary choice (deliberate): reload happens only at user-action
+        boundaries (opening Settings, Organize Now) — never from a timer —
+        so the snapshot can't change under running code mid-flight. The
+        watcher's ignore-list lambda reads self.settings dynamically, so it
+        picks up the reloaded dict with no extra wiring. Our own saves also
+        bump the fingerprint; the follow-up reload then just re-parses
+        identical content (harmless no-op). A changed-but-corrupt file keeps
+        the running snapshot (and is logged) instead of adopting
+        load_settings()' reset-to-defaults.
+        """
+        try:
+            current = _settings_fingerprint_now()
+        except Exception as exc:
+            org.log_activity(f"ERROR: App._maybe_reload_settings stat: {exc}")
+            return
+        if current is None or current == self._settings_fingerprint:
+            return
+        try:
+            json.loads(app_settings.SETTINGS_PATH.read_text(encoding="utf-8"))
+        except Exception as exc:
+            org.log_activity(
+                "ERROR: App._maybe_reload_settings: settings.json changed "
+                f"but unreadable ({exc}); keeping running settings")
+            self._settings_fingerprint = current
+            return
+        self.settings = app_settings.load_settings()
+        self._settings_fingerprint = current
+
     def open_settings(self):
+        self._maybe_reload_settings()
         win = ctk.CTkToplevel(self)
         win.title("Settings")
         win.geometry("520x480")
