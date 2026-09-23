@@ -47,8 +47,10 @@ class OrganizerEventHandler(FileSystemEventHandler):
     # -- watchdog callbacks -------------------------------------------------
     def on_created(self, event):  # noqa: N802 (watchdog naming)
         if event.is_directory:
-            self._emit({"status": "protected-check", "src": event.src_path,
-                        "reason": "new folder — checking SafeZone"})
+            # Internal-only signal: a new folder is not a result. Its real
+            # SafeZone verdict is computed later (see _handle / organize_folder)
+            # and only a genuine "protected" status reaches the feed queue —
+            # never an unverified "protected-check".
             return
         self._schedule(event.src_path)
 

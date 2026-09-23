@@ -63,8 +63,11 @@ def feed_text(result: dict) -> tuple[str, str]:
         name = result.get("name") or Path(result.get("src", "?")).name
         return f"\U0001F6E1\uFE0F {name} skipped (protected)", "protected"
     if status == "protected-check":
-        name = Path(result.get("src", "?")).name
-        return f"\U0001F6E1\uFE0F {name} skipped (protected project folder)", "protected"
+        # Checking-in-progress, not a result: never present this as a
+        # "skipped (protected)" verdict. Genuine protected folders arrive
+        # separately with status "protected" (branch above), which does
+        # reflect the real is_protected_folder() outcome.
+        return "", "info"
     if status == "skipped":
         reason = result.get("reason", "")
         if reason in ("already organized", "system file",

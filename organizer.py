@@ -288,7 +288,10 @@ def organize_file(file_path: str | Path, watched_root: str | Path,
         # Already sitting in its correct category folder (e.g. re-scan
         # after a move): nothing to do. Checked BEFORE the subfolder
         # short-circuit below, which would otherwise swallow this case.
-        if (src.parent.name == category
+        # Folder-name comparison is case-insensitive (Windows folders like
+        # "documents" must match category "Documents"); the config lookup
+        # in get_category() above is intentionally left case-sensitive.
+        if (src.parent.name.lower() == category.lower()
                 and src.parent.parent.resolve() == root.resolve()):
             return {"status": "skipped", "reason": "already organized",
                     "src": str(src), "dst": None}
