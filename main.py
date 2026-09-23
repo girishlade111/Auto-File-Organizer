@@ -99,9 +99,11 @@ def _run_gui_with_tray(start_in_tray: bool) -> int:
                 get_ignore_list=lambda: app_settings.load_settings().get("ignore_list", []))
         headless_watcher.pause_all()
         if s.get("live_mode", True):
-            for folder in s.get("watched_folders", []):
-                if Path(folder).is_dir():
-                    headless_watcher.add_folder(folder)
+            # resume_all() unpauses AND starts observers; add_folder() alone
+            # refuses to start anything while paused, so this call is what
+            # actually begins watching.
+            headless_watcher.resume_all(
+                [f for f in s.get("watched_folders", []) if Path(f).is_dir()])
 
     def _organize_headless():
         import organizer as org

@@ -140,10 +140,28 @@ def _unique_destination(dest_dir: Path, filename: str) -> Path:
 
 
 def log_activity(message: str) -> None:
-    _ensure_logs_dir()
-    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(ACTIVITY_LOG, "a", encoding="utf-8") as fh:
-        fh.write(f"[{stamp}] {message}\n")
+    try:
+        _ensure_logs_dir()
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(ACTIVITY_LOG, "a", encoding="utf-8") as fh:
+            fh.write(f"[{stamp}] {message}\n")
+    except OSError:
+        pass  # logging must never crash the app; nothing left to log to.
+
+
+def _atomic_write_json(path: Path, data) -> None:
+    """Write JSON crash-safely: temp file + fsync + os.replace.
+
+    Raises OSError on failure so callers can report it (never silent).
+    """
+    import os
+
+    tmp = Path(str(path) + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
 
 
 # ---------------------------------------------------------------------------
@@ -155,16 +173,18 @@ def _load_undo_stack() -> list[dict]:
         with open(UNDO_FILE, "r", encoding="utf-8") as fh:
             data = json.load(fh)
         return data if isinstance(data, list) else []
-    except (OSError, json.JSONDecodeError):
+    except json.JSONDecodeError:
+        log_activity("UNDO HISTORY WAS CORRUPT; cleared to protect your files.")
+        return []
+    except OSError:
         return []
 
 
 def _save_undo_stack(stack: list[dict]) -> None:
     try:
-        with open(UNDO_FILE, "w", encoding="utf-8") as fh:
-            json.dump(stack[-200:], fh, indent=2)  # cap: last 200 moves
-    except OSError:
-        pass
+        _atomic_write_json(UNDO_FILE, stack[-200:])  # cap: last 200 moves
+    except OSError as exc:
+        log_activity(f"ERROR: could not save undo history: {exc}")
 
 
 def record_move(original: Path, moved_to: Path, batch_id: str | None = None) -> None:

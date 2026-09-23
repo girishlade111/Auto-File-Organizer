@@ -347,8 +347,10 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
                    if Path(f).is_dir()]
         self.watcher.pause_all()
         if live and watchdog_available():
-            for folder in folders:
-                self.watcher.add_folder(folder)
+            # resume_all() unpauses AND starts observers; add_folder() alone
+            # refuses to start anything while paused, so this call is what
+            # actually begins watching.
+            self.watcher.resume_all(folders)
         try:
             if live:
                 self.live_switch.select()

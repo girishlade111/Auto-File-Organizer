@@ -49,6 +49,13 @@ pyinstaller --onedir --windowed --name FileOrganizer --icon assets\icon.ico main
 iscc installer\FileOrganizer.iss
 ```
 
+Run tests (SafeZone Detection suite):
+
+```powershell
+pip install -r requirements-dev.txt
+pytest
+```
+
 ## Project layout
 
 ```

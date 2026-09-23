@@ -7,10 +7,33 @@ settings.json is user state written by the GUI.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parent
 SETTINGS_PATH = APP_DIR / "settings.json"
+
+
+def _log_settings_problem(message: str) -> None:
+    """Best-effort logging to activity.log; never raises."""
+    try:
+        from organizer import log_activity
+        log_activity(message)
+    except Exception:
+        pass
+
+
+def _atomic_write_json(path: Path, data) -> None:
+    """Write JSON crash-safely: temp file + fsync + os.replace.
+
+    Raises OSError on failure so callers can report it (never silent).
+    """
+    tmp = Path(str(path) + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
 
 
 def default_downloads_folder() -> str:
@@ -29,7 +52,10 @@ def load_settings() -> dict:
             data = json.load(fh)
         if isinstance(data, dict):
             defaults.update(data)
-    except (OSError, json.JSONDecodeError):
+    except json.JSONDecodeError:
+        _log_settings_problem(
+            "SETTINGS FILE WAS CORRUPT; reset to defaults to protect your files.")
+    except OSError:
         pass
     # Normalize types (guard against hand-edited / corrupt files).
     if not isinstance(defaults.get("watched_folders"), list):
@@ -43,7 +69,6 @@ def load_settings() -> dict:
 
 def save_settings(settings: dict) -> None:
     try:
-        with open(SETTINGS_PATH, "w", encoding="utf-8") as fh:
-            json.dump(settings, fh, indent=2)
-    except OSError:
-        pass
+        _atomic_write_json(SETTINGS_PATH, settings)
+    except OSError as exc:
+        _log_settings_problem(f"ERROR: could not save settings: {exc}")

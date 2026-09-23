@@ -121,29 +121,42 @@ class FolderWatcherManager:
 
     # -- lifecycle ----------------------------------------------------------
     def add_folder(self, folder: str | Path) -> bool:
+        """Register one folder for live watching.
+
+        Never starts an Observer while paused: when paused, returns False
+        without creating anything — resume_all() will add the folder later.
+        (Previously this created, started, then immediately stopped the
+        Observer, so live mode silently watched nothing.)
+        """
         if not watchdog_available():
             return False
         key = str(Path(folder).resolve())
         with self._lock:
-            if key in self._observers or self._paused:
-                if key in self._observers:
-                    return True
-            handler = OrganizerEventHandler(
-                folder, on_result=self.on_result,
-                get_ignore_list=self.get_ignore_list)
-            observer = Observer()
-            observer.schedule(handler, str(folder), recursive=False)
-            try:
-                observer.start()
-            except OSError:
-                return False
-            if not self._paused:
-                self._observers[key] = observer
+            if key in self._observers:
+                return True  # already watching this folder
+            if self._paused:
+                return False  # paused — resume_all() picks this up later
+        handler = OrganizerEventHandler(
+            folder, on_result=self.on_result,
+            get_ignore_list=self.get_ignore_list)
+        observer = Observer()
+        observer.schedule(handler, str(folder), recursive=False)
+        try:
+            observer.start()
+        except OSError:
+            return False
+        with self._lock:
+            if self._paused:
+                # Lost a race with pause_all(): don't leak a live observer.
+                raced = True
             else:
-                observer.stop()
-                observer.join(timeout=5)
-                return False
-            return True
+                self._observers[key] = observer
+                raced = False
+        if raced:
+            observer.stop()
+            observer.join(timeout=5)
+            return False
+        return True
 
     def remove_folder(self, folder: str | Path) -> None:
         key = str(Path(folder).resolve())
