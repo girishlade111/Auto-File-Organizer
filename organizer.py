@@ -82,7 +82,11 @@ def load_category_map(config_path: str | Path = CONFIG_PATH) -> dict[str, str]:
 
 
 def reload_category_map() -> dict[str, str]:
-    """Force re-read of config.json (tests / future settings use)."""
+    """Force re-read of config.json.
+
+    Called when opening the Settings dialog so the category list reflects
+    hand-edits without an app restart.
+    """
     global _category_map, _category_dirs, _display_names
     with _lock:
         _category_map = None

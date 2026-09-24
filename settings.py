@@ -47,7 +47,7 @@ def _clean_str_list(values: list, field: str) -> list[str]:
     temporarily unplugged drive is still valid configuration, and callers
     already guard with Path(f).is_dir() before acting on entries.
     """
-    cleaned = [v for v in values if isinstance(v, str) and v.strip()]
+    cleaned = [v.strip() for v in values if isinstance(v, str) and v.strip()]
     dropped = len(values) - len(cleaned)
     if dropped:
         _log_settings_problem(

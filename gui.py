@@ -12,6 +12,7 @@ OS light/dark theme automatically (no manual toggle).
 """
 
 from __future__ import annotations
+import hashlib
 import json
 import os
 
@@ -88,10 +89,13 @@ def feed_text(result: dict) -> tuple[str, str]:
 
 
 def _settings_fingerprint_now():
-    """(mtime, size) of settings.json, or None if unreadable/missing."""
+    """SHA-256 of settings.json's raw bytes, or None if unreadable/missing.
+
+    Exact content hash (not mtime+size): even a same-size rewrite inside one
+    mtime tick is detected. Hashing only — the file is tiny local JSON.
+    """
     try:
-        st = app_settings.SETTINGS_PATH.stat()
-        return (st.st_mtime, st.st_size)
+        return hashlib.sha256(app_settings.SETTINGS_PATH.read_bytes()).hexdigest()
     except OSError:
         return None
 
@@ -208,7 +212,10 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
             ctk.CTkButton(wrap, text="\U0001F4C2  Choose Different Folder…",
                           font=FONT_NORMAL, height=44, fg_color="transparent",
                           border_width=1,
-                          command=self._onboard_browse).pack(fill="x", pady=6)
+                           command=self._onboard_browse).pack(fill="x", pady=6)
+            ctk.CTkButton(wrap, text="Back", font=FONT_SMALL,
+                          fg_color="transparent",
+                          command=self._onboard_back).pack(pady=(6, 0))
             if self.onboard_choice:
                 ctk.CTkLabel(wrap, text=f"Selected: {self.onboard_choice}",
                              font=FONT_SMALL).pack(pady=8)
@@ -232,11 +239,11 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
                           command=self._onboard_back).pack()
 
     def _onboard_next(self):
-        self.onboard_step = 2
+        self.onboard_step = min(3, self.onboard_step + 1)
         self._render_onboard_step()
 
     def _onboard_back(self):
-        self.onboard_step = 2
+        self.onboard_step = max(1, self.onboard_step - 1)
         self._render_onboard_step()
 
     def _onboard_pick(self, path: str):
@@ -257,6 +264,7 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
         self.settings["watched_folders"] = watched
         self.settings["onboarding_done"] = True
         app_settings.save_settings(self.settings)
+        self._settings_fingerprint = _settings_fingerprint_now()
         self._show_dashboard()
         self._apply_live_mode(initial=True)
         # First run: organize immediately so users see value, then toast.
@@ -357,9 +365,11 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
     def _on_live_toggle(self):
         self.settings["live_mode"] = bool(self.live_switch.get())
         app_settings.save_settings(self.settings)
+        self._settings_fingerprint = _settings_fingerprint_now()
         self._apply_live_mode()
 
     def _apply_live_mode(self, initial: bool = False):
+        self._maybe_reload_settings()
         live = self.settings.get("live_mode", True)
         folders = [f for f in self.settings.get("watched_folders", [])
                    if Path(f).is_dir()]
@@ -443,6 +453,7 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
                       command=lambda f=folder: self.remove_folder(f)).pack(side="left", padx=3)
 
     def add_folder_dialog(self):
+        self._maybe_reload_settings()
         picked = filedialog.askdirectory(title="Choose a folder to organize")
         if not picked:
             return
@@ -454,11 +465,13 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
         folders.append(picked)
         self.settings["watched_folders"] = folders
         app_settings.save_settings(self.settings)
+        self._settings_fingerprint = _settings_fingerprint_now()
         self._refresh_folder_cards()
         self._apply_live_mode()
         self.push_feed(f"\U0001F4C1 Now watching {Path(picked).name}", "info")
 
     def remove_folder(self, folder: str):
+        self._maybe_reload_settings()
         if not messagebox.askyesno("Remove folder?",
                                    f"Stop organizing:\n{folder}\n\n"
                                    "Files already organized stay where they are."):
@@ -466,6 +479,7 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
         folders = [f for f in self.settings.get("watched_folders", []) if f != folder]
         self.settings["watched_folders"] = folders
         app_settings.save_settings(self.settings)
+        self._settings_fingerprint = _settings_fingerprint_now()
         self.watcher.remove_folder(folder)
         self._refresh_folder_cards()
         self._update_status_ui()
@@ -550,6 +564,7 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
         self._toast(f"{moved} file(s) organized{extra}")
 
     def _organize_single(self, folder: str):
+        self._maybe_reload_settings()
         ignore = self.settings.get("ignore_list", [])
 
         def _work():
@@ -656,6 +671,7 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
         ctk.CTkLabel(win, text="\U0001F4C2 Categories (managed automatically)",
                      font=FONT_SECTION).pack(anchor="w", padx=16, pady=(14, 2))
         try:
+            org.reload_category_map()  # config.json may be hand-edited; show fresh names
             cats = org.get_managed_category_dir_names()
             ctk.CTkLabel(win, text=", ".join(org.display_name(c) for c in cats),
                           font=FONT_SMALL, wraplength=460).pack(anchor="w", padx=16)
@@ -669,6 +685,7 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
                      if n.strip()]
             self.settings["ignore_list"] = names
             app_settings.save_settings(self.settings)
+            self._settings_fingerprint = _settings_fingerprint_now()
             self._refresh_folder_cards()
             self.push_feed("\U0001F6E1\uFE0F Ignore List updated", "info")
             win.destroy()
@@ -701,11 +718,3 @@ class App(ctk.CTk if _CTK_AVAILABLE else object):  # type: ignore
             self.destroy()
         except Exception as exc:
             org.log_activity(f"ERROR: App._quit_app destroy: {exc}")
-
-
-def launch(tray_controller=None):
-    """Entry point used by main.py (manual double-click path)."""
-    _require_ctk()
-    app = App(tray_controller=tray_controller)
-    app.mainloop()
-    return app

@@ -45,9 +45,11 @@ python main.py --tray     # background tray mode (what autostart uses)
 Build:
 
 ```powershell
-pyinstaller --onedir --windowed --name FileOrganizer --icon assets\icon.ico main.py
+pyinstaller --onedir --windowed --name FileOrganizer main.py
 iscc installer\FileOrganizer.iss
 ```
+
+> Note: no `--icon` flag — the tray icon is generated programmatically at runtime via `make_icon_image()`. To use a custom icon, drop an `assets\icon.ico` into the repo and add `--icon assets\icon.ico` to the PyInstaller command.
 
 Run tests (SafeZone Detection suite):
 
