@@ -37,7 +37,10 @@ Name: "startupicon"; Description: "Start automatically when Windows starts"; Gro
 ; PyInstaller --onedir output goes here (keep the folder layout intact —
 ; --onedir trades a messier folder for near-instant cold-start, worth it
 ; for a background tray app).
-Source: "dist\FileOrganizer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; NOTE: relative Source paths resolve against this script's directory
+; (installer\), not the repo root — hence the ..\ prefix. Run iscc from the
+; repo root exactly as README documents: iscc installer\FileOrganizer.iss
+Source: "..\dist\FileOrganizer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\Auto File Organizer"; Filename: "{app}\{#MyAppExeName}"

@@ -9,4 +9,7 @@ build/
 Output/
 .venv/
 venv/
+# Code-signing certificates must NEVER be committed (see BUILD.md).
+*.pfx
+*.p12
 
