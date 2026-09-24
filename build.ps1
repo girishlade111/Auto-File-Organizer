@@ -4,25 +4,33 @@
   Full build pipeline: PyInstaller -> Inno Setup -> (optional) Authenticode sign.
 .DESCRIPTION
   Unsigned by default so the local dev workflow keeps working with zero setup.
-  To sign a release build, set these BEFORE running (never commit them):
-    $env:FILEORGANIZER_CERT_PFX      = full path to the .pfx / .p12 certificate
-    $env:FILEORGANIZER_CERT_PASSWORD = certificate password (or leave unset to
-                                       be prompted securely at build time)
+  To sign a release build, complete the one-time SimplySign setup in BUILD.md
+  (mobile app + Desktop login). No files or passwords to configure: the script
+  finds the certificate in the Windows certificate store automatically.
+  Optional override: $env:FILEORGANIZER_CERT_SUBJECT (default
+  'Open Source Developer') if your certificate subject differs.
   See BUILD.md for the full pipeline documentation.
 #>
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
-function Invoke-Step($label, [scriptblock]$body) {
+# Runs a native exe step. Temporarily relaxes $ErrorActionPreference because
+# PowerShell 5.1 turns a native tool's stderr lines into terminating errors
+# under 'Stop' (pyinstaller/iscc log to stderr) — which would abort the build
+# whenever output is captured or redirected. Failure is still detected via
+# $LASTEXITCODE immediately after the call.
+function Invoke-Native($label, [scriptblock]$body) {
     Write-Host "`n=== $label ===" -ForegroundColor Cyan
-    & $body
-    if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) { throw "$label failed (exit $LASTEXITCODE)" }
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $body } finally { $ErrorActionPreference = $prevEap }
+    if ($LASTEXITCODE -ne 0) { throw "$label failed (exit $LASTEXITCODE)" }
 }
 
 # -- 1. PyInstaller -----------------------------------------------------------
 try { Get-Command pyinstaller -ErrorAction Stop | Out-Null }
 catch { throw "pyinstaller not found. Run: pip install -r requirements.txt; pip install pyinstaller" }
-Invoke-Step 'PyInstaller (onedir, windowed, bundles config.json)' {
+Invoke-Native 'PyInstaller (onedir, windowed, bundles config.json)' {
     pyinstaller -y --onedir --windowed --name FileOrganizer --add-data 'config.json;.' main.py
 }
 if (-not (Test-Path -LiteralPath 'dist\FileOrganizer\_internal\config.json')) {
@@ -39,15 +47,28 @@ foreach ($candidate in @(
     if ($candidate -and (Test-Path -LiteralPath $candidate)) { $iscc = $candidate; break }
 }
 if (-not $iscc) { throw 'ISCC.exe not found. Install Inno Setup 6: https://jrsoftware.org/isdl.php' }
-Invoke-Step "Inno Setup ($iscc)" { & $iscc 'installer\FileOrganizer.iss' }
+Invoke-Native "Inno Setup ($iscc)" { & $iscc 'installer\FileOrganizer.iss' }
 
 $installer = 'installer\Output\Setup-FileOrganizer.exe'
 if (-not (Test-Path -LiteralPath $installer)) { throw "expected installer missing: $installer" }
 
-# -- 3. Optional Authenticode signing -----------------------------------------
-$pfx = $env:FILEORGANIZER_CERT_PFX
-if ([string]::IsNullOrWhiteSpace($pfx) -or -not (Test-Path -LiteralPath $pfx)) {
-    Write-Host "`nSkipping code signing: FILEORGANIZER_CERT_PFX is not set (unsigned dev build)." -ForegroundColor Yellow
+# -- 3. Optional Authenticode signing (Certum SimplySign cloud cert) -----------
+# No local .pfx with SimplySign: the cert lives in the Windows certificate
+# store via the SimplySign Desktop virtual token, and signtool selects it by
+# subject name (/n). Override the expected subject if yours differs:
+#   $env:FILEORGANIZER_CERT_SUBJECT = '...'
+$certSubject = $env:FILEORGANIZER_CERT_SUBJECT
+if ([string]::IsNullOrWhiteSpace($certSubject)) { $certSubject = 'Open Source Developer' }
+$storeCerts = @(Get-ChildItem -Path 'Cert:\CurrentUser\My' -ErrorAction SilentlyContinue |
+    Where-Object { $_.Subject -like "*$certSubject*" -and $_.HasPrivateKey })
+if ($storeCerts.Count -eq 0) {
+    Write-Host "`nSkipping code signing: no '$certSubject' certificate with a private key in Cert:\CurrentUser\My (unsigned dev build)." -ForegroundColor Yellow
+    Write-Host 'To sign: install SimplySign Desktop, log in (email + mobile OTP), then re-run. See BUILD.md.' -ForegroundColor Yellow
+}
+elseif ($storeCerts.Count -gt 1) {
+    Write-Host "`nSkipping code signing: $($storeCerts.Count) certificates match '$certSubject'." -ForegroundColor Yellow
+    $storeCerts | Select-Object Subject, Thumbprint | Format-Table -AutoSize | Out-String | Write-Host
+    Write-Host 'Set FILEORGANIZER_CERT_SUBJECT to match exactly one, or sign manually with /sha1 <thumbprint>. Unsigned dev build continues below.' -ForegroundColor Yellow
 }
 else {
     $signtool = $null
@@ -61,18 +82,13 @@ else {
         if ($candidate -and (Test-Path -LiteralPath $candidate)) { $signtool = $candidate; break }
     }
     if (-not $signtool) { throw 'signtool.exe not found. Install the Windows SDK: https://developer.microsoft.com/windows/downloads/windows-sdk/' }
-    $password = $env:FILEORGANIZER_CERT_PASSWORD
-    if ([string]::IsNullOrEmpty($password)) {
-        $secure = Read-Host -Prompt 'Certificate password (not stored anywhere)' -AsSecureString
-        $password = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-            [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
-    }
+    Write-Host "`nSigning requires SimplySign mobile app confirmation - check your phone when prompted. (Tip: enable PIN cache in SimplySign Desktop Options to approve once.)" -ForegroundColor Yellow
     foreach ($target in @('dist\FileOrganizer\FileOrganizer.exe', $installer)) {
-        Write-Host "`nSigning $target ..." -ForegroundColor Cyan
-        & $signtool sign /f $pfx /p $password /fd sha256 /tr http://timestamp.digicert.com /td sha256 $target
-        if ($LASTEXITCODE -ne 0) { throw "signtool failed for $target (exit $LASTEXITCODE)" }
+        Invoke-Native "Signing $target" {
+            & $signtool sign /n $certSubject /fd sha256 /tr http://timestamp.digicert.com /td sha256 $target
+        }
     }
-    Write-Host '`nBoth the app exe and the installer are signed.' -ForegroundColor Green
+    Write-Host "`nBoth the app exe and the installer are signed." -ForegroundColor Green
 }
 
 Write-Host "`nBuild complete (unsigned unless a certificate was configured):" -ForegroundColor Green

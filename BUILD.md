@@ -45,23 +45,66 @@ Notes:
   the `.iss`). Silent install for testing:
   `Setup-FileOrganizer.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART`.
 
-## Signing a release (activate once a certificate exists)
+## Signing a release (Certum SimplySign cloud certificate)
+
+This project uses Certum's **Open Source Code Signing in the Cloud**
+certificate. There is deliberately **no local `.pfx` file**: the private key
+lives in Certum's cloud HSM and reaches `signtool` through the SimplySign
+Desktop virtual token (CSP), which exposes the certificate in the Windows
+certificate store. `signtool` therefore selects the cert with `/n` (subject
+name) — never `/f <path>`. This matches Certum's own documented syntax
+(`signtool sign /n "<owner>" ...`, see Certum's "Code Signing – signing the
+code using tools like Signtool" instruction) and real-world SimplySign OSS
+usage (`/n "Open Source Developer"`).
 
 Sign **both** the app exe and the installer — SmartScreen evaluates each
-independently:
+independently.
+
+### One-time setup (manual)
+
+1. Buy/activate "Open Source Code Signing in the Cloud" and complete Certum's
+   identity verification. The issued subject contains "Open Source Developer"
+   plus your name.
+2. Install **SimplySign Mobile** (Android/iOS) and activate it with the QR
+   flow from Certum's email. Note: it activates on ONE device only.
+3. Install **SimplySign Desktop** on the build machine (during setup, unselect
+   "proCertum SmartSign"). Log in with your SimplySign email + the mobile-app
+   OTP. This registers the virtual token that `signtool` uses.
+4. Verify the certificate is visible to Windows with a private key:
+   ```powershell
+   Get-ChildItem Cert:\CurrentUser\My |
+     Where-Object { $_.Subject -like '*Open Source Developer*' } |
+     Select-Object Subject, Thumbprint, HasPrivateKey
+   ```
+   `HasPrivateKey` must be True.
+
+### Signing
 
 ```powershell
-$env:FILEORGANIZER_CERT_PFX = 'C:\path\to\cert.pfx'
-$env:FILEORGANIZER_CERT_PASSWORD = '...'   # or leave unset to be prompted
-.\build.ps1
+.\build.ps1   # signs automatically when the certificate above is present
 ```
 
-Equivalent manual commands:
+Equivalent manual commands (subject name from the store, not a file):
 
 ```powershell
-signtool sign /f $env:FILEORGANIZER_CERT_PFX /p $env:FILEORGANIZER_CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 dist\FileOrganizer\FileOrganizer.exe
-signtool sign /f $env:FILEORGANIZER_CERT_PFX /p $env:FILEORGANIZER_CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 installer\Output\Setup-FileOrganizer.exe
+signtool sign /n "Open Source Developer" /fd sha256 /tr http://timestamp.digicert.com /td sha256 dist\FileOrganizer\FileOrganizer.exe
+signtool sign /n "Open Source Developer" /fd sha256 /tr http://timestamp.digicert.com /td sha256 installer\Output\Setup-FileOrganizer.exe
 ```
+
+If several matching certificates exist (e.g. old + renewed side by side), pin
+the exact one by thumbprint instead of `/n`:
+`signtool sign /sha1 <THUMBPRINT> /fd sha256 /tr ... <file>`.
+
+### Interactive confirmation (important)
+
+Each `signtool` invocation triggers a SimplySign approval on your phone
+(PIN/mobile confirmation) — `build.ps1` prints a "check your phone" warning
+before calling signtool so it never looks hung. Tip: SimplySign Desktop's
+Options menu has "Enable PIN cache for CSP/KSP-based applications" (~3-hour
+cache), so signing both files normally needs just one phone approval.
+Fully unattended CI signing exists (TOTP-based tooling that drives Certum's
+cloud API without the Desktop client), but that is overkill for a solo dev's
+local release builds — revisit only if releases move to CI.
 
 Verify afterwards:
 
@@ -71,9 +114,12 @@ Get-AuthenticodeSignature dist\FileOrganizer\FileOrganizer.exe, installer\Output
 
 Rules:
 
-- The certificate password must **never** be committed or hardcoded — env var
-  or interactive prompt only.
-- Never commit certificate files: `.gitignore` blocks `*.pfx` / `*.p12`.
+- SimplySign account credentials, OTP/TOTP secrets, and your PIN must **never**
+  be committed or hardcoded anywhere — they live on your phone and in your
+  head, not in the repo. (There is no password to configure: with the store
+  based `/n` flow, approval happens on the phone, not via a `/p` flag.)
+- Never commit certificate files: `.gitignore` blocks `*.pfx` / `*.p12`
+  (retained in case some other signing method is ever used).
 - Timestamping (`/tr ... /td sha256`) keeps existing installs trusted after the
   certificate itself expires.
 - With no certificate configured the script prints a skip message and exits 0 —
