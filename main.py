@@ -88,6 +88,25 @@ def _run_gui_with_tray(start_in_tray: bool) -> int:
                 return True
         return bool(app_settings.load_settings().get("live_mode", True))
 
+    def _quit_all():
+        try:
+            if headless_watcher is not None:
+                headless_watcher.stop_all()
+        except Exception as exc:
+            log_activity(f"ERROR: shutdown (headless watcher stop): {exc}")
+        app = holder.get("app")
+        if app is not None:
+            try:
+                app.watcher.stop_all()
+            except Exception as exc:
+                log_activity(f"ERROR: shutdown (GUI watcher stop): {exc}")
+            try:
+                app.destroy()
+            except Exception as exc:
+                log_activity(f"ERROR: shutdown (app.destroy): {exc}")
+        if tray is not None:
+            tray.stop()
+
     tray = TrayController(on_open=_open, on_organize=_organize, on_undo=_undo,
                           on_toggle_live=_toggle_live, on_exit=_quit_all,
                           is_live=_is_live) if tray_available() else None
@@ -115,25 +134,6 @@ def _run_gui_with_tray(start_in_tray: bool) -> int:
         for folder in s.get("watched_folders", []):
             if Path(folder).is_dir():
                 org.organize_folder(folder, s.get("ignore_list", []))
-
-    def _quit_all():
-        try:
-            if headless_watcher is not None:
-                headless_watcher.stop_all()
-        except Exception as exc:
-            log_activity(f"ERROR: shutdown (headless watcher stop): {exc}")
-        app = holder.get("app")
-        if app is not None:
-            try:
-                app.watcher.stop_all()
-            except Exception as exc:
-                log_activity(f"ERROR: shutdown (GUI watcher stop): {exc}")
-            try:
-                app.destroy()
-            except Exception as exc:
-                log_activity(f"ERROR: shutdown (app.destroy): {exc}")
-        if tray is not None:
-            tray.stop()
 
     if start_in_tray or not _gui_available():
         # Background mode: tray icon + headless watchers, no window.
