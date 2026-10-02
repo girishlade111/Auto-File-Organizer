@@ -79,3 +79,7 @@ installer/           - Inno Setup script (Startup-folder autostart)
 
 Python · watchdog · CustomTkinter · pystray · PyInstaller (`--onedir`) · Inno Setup.
 Free tier v1 (matches the LadeStack free+donation pattern). Multi-PC sync of the Ignore List and Pro category presets are reserved for v1.1 — the architecture doesn't block them.
+
+---
+
+Built by Girish Lade · https://ladestack.in
